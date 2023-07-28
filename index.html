@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Issue Analytics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        /* Navigation Bar Styles */
+        #navbar {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        #navbar button {
+            padding: 10px 20px;
+            margin: 0 5px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            background-color: #f2f2f2;
+            border-radius: 4px;
+        }
+
+        #navbar button.active {
+            background-color: #ccc;
+        }
+
+        #statusChartContainer {
+            text-align: left; /* Align the chart to the left */
+            max-width: 400px; /* Set the maximum width of the chart */
+            margin-bottom: 20px;
+        }
+
+        #milestoneTable {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        #milestoneTable th, #milestoneTable td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        #milestoneTable th {
+            background-color: #f2f2f2;
+        }
+
+        #milestoneTable tbody tr:hover {
+            background-color: #f2f2f2;
+        }
+
+        /* Add a class for the GitHub link style */
+        .github-link {
+            text-decoration: none;
+            color: #0366d6; /* GitHub link color */
+        }
+    </style>
+</head>
+<body>
+    <div id="navbar">
+        <button class="tablink" onclick="openTab('chartTab')">Pie Chart</button>
+        <button class="tablink" onclick="openTab('tableTab')">Issue Table</button>
+    </div>
+
+    <!-- Pie Chart Container -->
+    <div id="chartTab" style="display: block;">
+        <div id="statusChartContainer">
+            <canvas id="statusChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Table Container -->
+    <div id="tableTab" style="display: none;">
+        <h2>Issues with Milestones</h2>
+        <table id="milestoneTable">
+            <thead>
+                <tr>
+                    <th>Assignees</th>
+                    <th>Issue Title</th>
+                    <th>Milestone Title</th>
+                    <th>Number of Issues</th>
+                    <th>Created At</th>
+                    <th>Closed At</th>
+                    <th>Closed By</th>
+                    <th>Updated At</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Milestone data will be dynamically inserted here -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Global variables for chart and table
+        let statusChart;
+        let tableDataGenerated = false;
+
+        // Function to fetch CSV data and generate charts
+        async function fetchIssuesAndGenerateCharts() {
+            try {
+                const response = await fetch('issues_with_info.csv');
+                const csvData = await response.text();
+                const parsedData = Papa.parse(csvData, { header: true, skipEmptyLines: true });
+                const issues = parsedData.data;
+
+                // Function to calculate issue status analytics
+                function calculateIssueStatusAnalytics() {
+                    let openCount = 0;
+                    let closedCount = 0;
+                    const assigneeStatusCounts = {}; // To store counts for each assignee
+
+                    issues.forEach(issue => {
+                        const state = issue["State"];
+                        if (state === "open") {
+                            openCount++;
+                        } else if (state === "closed") {
+                            closedCount++;
+                        }
+
+                        // Count issues for each assignee
+                        const assignees = issue["Assignees"];
+                        if (assignees) {
+                            const assigneeList = assignees.split(",");
+                            assigneeList.forEach(assignee => {
+                                const trimmedAssignee = assignee.trim();
+                                if (assigneeStatusCounts[trimmedAssignee]) {
+                                    if (state === "open") {
+                                        assigneeStatusCounts[trimmedAssignee].open++;
+                                    } else if (state === "closed") {
+                                        assigneeStatusCounts[trimmedAssignee].closed++;
+                                    }
+                                } else {
+                                    assigneeStatusCounts[trimmedAssignee] = { open: 0, closed: 0 };
+                                    if (state === "open") {
+                                        assigneeStatusCounts[trimmedAssignee].open = 1;
+                                    } else if (state === "closed") {
+                                        assigneeStatusCounts[trimmedAssignee].closed = 1;
+                                    }
+                                }
+                            });
+                        }
+                    });
+
+                    return { open: openCount, closed: closedCount, assignees: assigneeStatusCounts };
+                }
+
+                // Function to calculate milestone analytics
+                function calculateMilestoneAnalytics() {
+                    const milestoneCounts = {};
+
+                    issues.forEach(issue => {
+                        const milestone = issue["Milestone Title"];
+                        if (milestone) {
+                            milestoneCounts[milestone] = (milestoneCounts[milestone] || 0) + 1;
+                        }
+                    });
+
+                    return milestoneCounts;
+                }
+
+                // Function to generate issue status chart
+                function generateStatusChart() {
+                    const statusCounts = calculateIssueStatusAnalytics();
+                    const assignees = Object.keys(statusCounts.assignees);
+                    const assigneeCounts = Object.values(statusCounts.assignees).map(counts => counts.open + counts.closed);
+
+                    if (statusChart) {
+                        statusChart.data.datasets[0].data = [statusCounts.open, statusCounts.closed, ...assigneeCounts];
+                        statusChart.data.labels = ['Open', 'Closed', ...assignees];
+                        statusChart.options.title.text = `Issue Status (Total: ${issues.length})`;
+                        statusChart.update();
+                    } else {
+                        statusChart = new Chart(document.getElementById('statusChart'), {
+                            type: 'pie',
+                            data: {
+                                labels: ['Open', 'Closed', ...assignees],
+                                datasets: [{
+                                    data: [statusCounts.open, statusCounts.closed, ...assigneeCounts],
+                                    backgroundColor: ['rgba(255, 99, 132, 0.7)', 'rgba(75, 192, 192, 0.7)', ...generateRandomColors(assignees.length)],
+                                    borderWidth: 1
+                                }]
+                            },
+                            options: {
+                                title: {
+                                    display: true,
+                                    text: `Issue Status (Total: ${issues.length})`
+                                },
+                                legend: {
+                                    display: true,
+                                    onClick: (event, legendItem) => {
+                                        const index = legendItem.datasetIndex;
+                                        if (index > 1) {
+                                            const meta = statusChart.getDatasetMeta(index);
+                                            meta.hidden = meta.hidden === null ? !statusChart.data.datasets[index].hidden : null;
+                                        }
+                                        statusChart.update();
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+
+                // Function to generate random colors for assignees
+                function generateRandomColors(count) {
+                    const colors = [];
+                    for (let i = 0; i < count; i++) {
+                        const r = Math.floor(Math.random() * 256);
+                        const g = Math.floor(Math.random() * 256);
+                        const b = Math.floor(Math.random() * 256);
+                        colors.push(`rgba(${r}, ${g}, ${b}, 0.7)`);
+                    }
+                    return colors;
+                }
+
+                // Function to generate milestone table
+                function generateMilestoneTable() {
+                    if (tableDataGenerated) return; // Only generate table data once
+
+                    const milestoneCounts = calculateMilestoneAnalytics();
+                    const milestoneTableBody = document.querySelector("#milestoneTable tbody");
+
+                    issues.forEach(issue => {
+                        const row = document.createElement("tr");
+                        const assigneesCell = document.createElement("td");
+                        const issueTitleCell = document.createElement("td");
+                        const milestoneCell = document.createElement("td");
+                        const countCell = document.createElement("td");
+                        const createdAtCell = document.createElement("td");
+                        const closedAtCell = document.createElement("td");
+                        const closedByCell = document.createElement("td");
+                        const updatedAtCell = document.createElement("td");
+
+                        // Add link to the assignees' assigned issues on GitHub
+                        const assignees = issue["Assignees"];
+                        if (assignees) {
+                            const assigneeLinks = assignees.split(",").map(assignee => {
+                                const assigneeLink = document.createElement("a");
+                                assigneeLink.href = `https://github.com/issues?q=is%3Aopen+is%3Aissue+assignee%3A${encodeURIComponent(assignee.trim())}`;
+                                assigneeLink.textContent = assignee.trim();
+                                assigneeLink.className = "github-link"; // Apply the GitHub link style
+                                return assigneeLink;
+                            });
+                            assigneeLinks.forEach(assigneeLink => {
+                                assigneesCell.appendChild(assigneeLink);
+                                assigneesCell.appendChild(document.createElement("br")); // Add line break between assignees
+                            });
+                        }
+
+                        issueTitleCell.textContent = issue["Issue Title"];
+                        milestoneCell.textContent = issue["Milestone Title"];
+                        countCell.textContent = 1; // Since each row represents one issue, set count to 1
+
+                        createdAtCell.textContent = issue["Created At"];
+                        closedAtCell.textContent = issue["Closed At"];
+                        closedByCell.textContent = issue["Closed By"];
+                        updatedAtCell.textContent = issue["Updated At"];
+
+                        row.appendChild(assigneesCell);
+                        row.appendChild(issueTitleCell);
+                        row.appendChild(milestoneCell);
+                        row.appendChild(countCell);
+                        row.appendChild(createdAtCell);
+                        row.appendChild(closedAtCell);
+                        row.appendChild(closedByCell);
+                        row.appendChild(updatedAtCell);
+                        milestoneTableBody.appendChild(row);
+                    });
+
+                    tableDataGenerated = true;
+                }
+
+                // Call the functions to generate charts and tables
+                generateStatusChart();
+                generateMilestoneTable();
+
+            } catch (error) {
+                console.error('Error fetching or parsing CSV:', error);
+            }
+        }
+
+        // Function to switch between tabs
+        function openTab(tabName) {
+            const tabs = document.querySelectorAll('.tablink');
+            const tabContainers = document.querySelectorAll('[id$="Tab"]');
+
+            tabs.forEach(tab => {
+                tab.classList.toggle('active', tab.id === tabName);
+            });
+
+            tabContainers.forEach(container => {
+                container.style.display = container.id === tabName ? 'block' : 'none';
+            });
+
+            if (tabName === 'tableTab') {
+                fetchIssuesAndGenerateCharts(); // Refresh table data when switching to the table tab
+            }
+        }
+
+        // Call the function to fetch issues and generate charts
+        fetchIssuesAndGenerateCharts();
+    </script>
+</body>
+</html>
